@@ -9,6 +9,12 @@ then use this app to smoothly interpolate every setting across the frames in
 between and write the result straight to their `.rrdata` sidecars. Refresh
 the folder in RapidRAW and export as normal.
 
+**New to RapidTimelapse? Watch the tutorial:**
+
+[![RapidTimelapse tutorial video](docs/tutorial-thumbnail.jpg)](https://youtu.be/GPtzFxWJlyk)
+
+**[⬇ Download the latest version](https://github.com/crispin81/RapidTimelapse/releases/latest)**
+
 Free and open-source, licensed [AGPL-3.0](LICENSE).
 
 ## Installing
