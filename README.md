@@ -9,6 +9,8 @@ then use this app to smoothly interpolate every setting across the frames in
 between and write the result straight to their `.rrdata` sidecars. Refresh
 the folder in RapidRAW and export as normal.
 
+Part of a family of apps by Chris Cork Photography, alongside RapidCulling and RapidRetouch.
+
 **New to RapidTimelapse? Watch the tutorial:**
 
 [![RapidTimelapse tutorial video](docs/tutorial-thumbnail.jpg)](https://youtu.be/GPtzFxWJlyk)
