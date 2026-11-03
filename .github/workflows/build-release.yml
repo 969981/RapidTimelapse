@@ -1,0 +1,175 @@
+name: Build RapidTimelapse and publish multi-platform release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact 40-character upstream master Git SHA to build'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rapidtimelapse-build-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate source and create draft release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify upstream SHA is integrated into master
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid source SHA."; exit 1; }
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD || {
+            echo "::error::Source SHA must be reachable from fork master."
+            exit 1
+          }
+
+      - name: Create draft prerelease (no publishing until every build succeeds)
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          tag="autosync-${SOURCE_SHA:0:12}"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" --draft --prerelease \
+              --title "RapidTimelapse upstream ${SOURCE_SHA:0:12}" \
+              --notes "Unofficial automated prerelease compiled from crispin81/RapidTimelapse master at $SOURCE_SHA. Linux, Windows and macOS installers are unsigned. Back up your edits and sidecars before testing development builds."
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact official source revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+
+      - name: Confirm exact revision
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libxdo-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.platform }}
+
+      - name: Install Node.js 22 with npm dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install upstream patched GTK AppImage hook
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          mkdir -p ~/.cache/tauri
+          cp .github/appimage/linuxdeploy-plugin-gtk.sh ~/.cache/tauri/linuxdeploy-plugin-gtk.sh
+          chmod +x ~/.cache/tauri/linuxdeploy-plugin-gtk.sh
+
+      - name: Build and attach native installers to draft prerelease
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: RapidTimelapse upstream ${{ inputs.source_sha }}
+          releaseDraft: true
+          prerelease: true
+          args: ${{ matrix.args }}
+
+  publish:
+    name: Verify all platforms and publish final prerelease
+    runs-on: ubuntu-24.04
+    needs: [prepare, build]
+    permissions:
+      contents: write
+    steps:
+      - name: Verify downloadable Windows, macOS and Linux packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/assets.txt
+          cat /tmp/assets.txt
+          grep -qiE '\\.AppImage$' /tmp/assets.txt || { echo "::error::No Linux AppImage."; exit 1; }
+          grep -qiE '\\.deb$' /tmp/assets.txt || { echo "::error::No Linux DEB."; exit 1; }
+          grep -qiE '\\.rpm$' /tmp/assets.txt || { echo "::error::No Linux RPM."; exit 1; }
+          grep -qiE '\\.dmg$' /tmp/assets.txt || { echo "::error::No macOS DMG."; exit 1; }
+          grep -qiE '\\.msi$' /tmp/assets.txt || { echo "::error::No Windows MSI."; exit 1; }
+          grep -qiE '\\.exe$' /tmp/assets.txt || { echo "::error::No Windows EXE."; exit 1; }
+
+      - name: Publish successful prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

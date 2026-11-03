@@ -1,0 +1,95 @@
+name: Sync RapidTimelapse upstream and trigger builds
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/sync-upstream.yml
+  schedule:
+    - cron: '41 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: rapidtimelapse-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-and-dispatch:
+    name: Merge official master safely and start cross-platform build
+    if: github.repository == '969981/RapidTimelapse'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout automation and source branch
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch official upstream, merge and detect new source revision
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/crispin81/RapidTimelapse.git
+          git fetch --no-tags upstream refs/heads/master:refs/remotes/upstream/master
+          latest="$(git rev-parse refs/remotes/upstream/master)"
+          echo "Official upstream master: $latest"
+          echo "Fork head:              $(git rev-parse HEAD)"
+
+          # Do not silently accept upstream history rewrites.
+          old="$(git ls-remote --heads origin refs/heads/rapidtimelapse-autosync-state | awk '{print $1}')"
+          if [[ -n "$old" && "$latest" != "$old" ]]; then
+            git fetch --no-tags origin "$old"
+            if ! git merge-base --is-ancestor "$old" "$latest"; then
+              echo "::error::Official upstream appears to have rewritten history. Manual review required."
+              exit 1
+            fi
+          fi
+
+          # Unlike a fast-forward, a normal merge preserves the automation
+          # files added to the fork's default master branch.
+          if ! git merge-base --is-ancestor "$latest" HEAD; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git merge --no-edit --no-ff refs/remotes/upstream/master
+            git push origin HEAD:refs/heads/master
+            echo "Merged upstream $latest into fork master."
+          else
+            echo "Fork master already contains upstream $latest."
+          fi
+
+          echo "source_sha=$latest" >> "$GITHUB_OUTPUT"
+          if [[ "$old" == "$latest" ]]; then
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch Tauri Windows, macOS, Linux build
+        if: steps.upstream.outputs.needs_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run build-release.yml --repo "$GITHUB_REPOSITORY" --ref master -f source_sha="$SOURCE_SHA"
+          echo "Dispatched multi-platform build for $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record last dispatched upstream SHA
+        if: steps.upstream.outputs.needs_build == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git push origin "$SOURCE_SHA:refs/heads/rapidtimelapse-autosync-state"
+
+      - name: No new changes
+        if: steps.upstream.outputs.needs_build != 'true'
+        run: echo "No new upstream revision to build." >> "$GITHUB_STEP_SUMMARY"
