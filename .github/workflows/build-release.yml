@@ -158,12 +158,12 @@ jobs:
           set -euo pipefail
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > /tmp/assets.txt
           cat /tmp/assets.txt
-          grep -qiE '\\.AppImage$' /tmp/assets.txt || { echo "::error::No Linux AppImage."; exit 1; }
-          grep -qiE '\\.deb$' /tmp/assets.txt || { echo "::error::No Linux DEB."; exit 1; }
-          grep -qiE '\\.rpm$' /tmp/assets.txt || { echo "::error::No Linux RPM."; exit 1; }
-          grep -qiE '\\.dmg$' /tmp/assets.txt || { echo "::error::No macOS DMG."; exit 1; }
-          grep -qiE '\\.msi$' /tmp/assets.txt || { echo "::error::No Windows MSI."; exit 1; }
-          grep -qiE '\\.exe$' /tmp/assets.txt || { echo "::error::No Windows EXE."; exit 1; }
+          grep -qiE '\.AppImage$' /tmp/assets.txt || { echo "::error::No Linux AppImage."; exit 1; }
+          grep -qiE '\.deb$' /tmp/assets.txt || { echo "::error::No Linux DEB."; exit 1; }
+          grep -qiE '\.rpm$' /tmp/assets.txt || { echo "::error::No Linux RPM."; exit 1; }
+          grep -qiE '\.dmg$' /tmp/assets.txt || { echo "::error::No macOS DMG."; exit 1; }
+          grep -qiE '\.msi$' /tmp/assets.txt || { echo "::error::No Windows MSI."; exit 1; }
+          grep -qiE '\.exe$' /tmp/assets.txt || { echo "::error::No Windows EXE."; exit 1; }
 
       - name: Publish successful prerelease
         env:
