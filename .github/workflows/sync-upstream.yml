@@ -37,6 +37,11 @@ jobs:
         run: |
           set -euo pipefail
           git remote add upstream https://github.com/crispin81/RapidTimelapse.git
+          if ! timeout 60 git ls-remote --exit-code --heads upstream refs/heads/master >/dev/null; then
+            echo "::error::Official upstream master is unavailable; preserving the last successful snapshot."
+            echo "Upstream unavailable; no source merge, build dispatch or state update." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           git fetch --no-tags upstream refs/heads/master:refs/remotes/upstream/master
           latest="$(git rev-parse refs/remotes/upstream/master)"
           echo "Official upstream master: $latest"
