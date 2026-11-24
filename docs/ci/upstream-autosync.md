@@ -33,3 +33,7 @@
 - Actions: https://github.com/969981/RapidTimelapse/actions
 - Releases: https://github.com/969981/RapidTimelapse/releases
 - Upstream reference: https://github.com/crispin81/RapidTimelapse/blob/master/.github/workflows/release.yml
+
+## Upstream availability guard (2026-11-24)
+
+The sync job now checks the official master ref with a bounded timeout before fetching. If unavailable, it fails without merging, dispatching builds, or advancing the last-dispatched state. Public web access could not be verified on this date; that alone does not establish deletion.
